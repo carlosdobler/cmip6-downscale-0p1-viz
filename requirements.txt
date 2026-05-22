@@ -1,0 +1,14 @@
+shiny
+xarray
+zarr
+gcsfs
+dask
+matplotlib
+geopandas
+numpy
+pandas
+scipy
+cartopy
+cftime
+netcdf4
+pyarrow

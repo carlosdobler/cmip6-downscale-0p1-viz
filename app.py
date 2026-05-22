@@ -23,9 +23,9 @@ VARS_CONFIG = {
         "diff_units": "K",
         "diff_type": "absolute",
         "era5_path": f"{BUCKET}/era5_land/daily_aggregates/temperature_2m.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/temperature_mean_1971-2010.zarr",
         "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/tas/tas_MPI-ESM1-2-HR_ww-isimip_ssp585_day.zarr",
         "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/temperature/temperature_MPI-ESM1-2-HR_ww-isimip_ssp585_mean_1971-2010.zarr",
-        "diff_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies_diff_era5land/temperature/",
         "era5_var": "temperature_2m",
         "cmip6_var": "tas",
         "diff_var": "diff",
@@ -36,9 +36,9 @@ VARS_CONFIG = {
         "diff_units": "%",
         "diff_type": "relative",
         "era5_path": f"{BUCKET}/era5_land/daily_aggregates/total_precipitation_sum.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/precipitation_mean_1971-2010.zarr",
         "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/pr/pr_MPI-ESM1-2-HR_ww-isimip_ssp585_day.zarr",
         "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/precipitation/precipitation_MPI-ESM1-2-HR_ww-isimip_ssp585_mean_1971-2010.zarr",
-        "diff_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies_diff_era5land/precipitation/",
         "era5_var": "total_precipitation_sum",
         "cmip6_var": "pr",
         "diff_var": "diff",
@@ -81,13 +81,12 @@ def standardize_dims(ds):
 def load_datasets(var_key):
     cfg = VARS_CONFIG[var_key]
 
-    # Load climatology fully into memory
+    # Load CMIP6 climatology fully into memory
     ds_clim = xr.open_zarr(fs.get_mapper(cfg["clim_path"])).load()
-    ds_diff = xr.open_zarr(fs.get_mapper(cfg["diff_path"])).load()
-
-    # Standardize memory datasets
     ds_clim = standardize_dims(ds_clim)
-    ds_diff = standardize_dims(ds_diff)
+
+    # Initialize a Dataset for on-the-fly differences
+    ds_diff = ds_clim.copy(deep=True)
 
     # Lazy open daily stores (A and B)
     ds_a = xr.open_zarr(fs.get_mapper(cfg["era5_path"]), chunks="auto")
@@ -101,6 +100,10 @@ def load_datasets(var_key):
     ds_a = ds_a.sel(time=slice("1971-01-01", "2025-12-31"))
     ds_b = ds_b.sel(time=slice("1971-01-01", "2025-12-31"))
 
+    # Load ERA5 Climatology for diff calculation
+    ds_era5_clim = xr.open_zarr(fs.get_mapper(cfg["era5_clim_path"])).load()
+    ds_era5_clim = standardize_dims(ds_era5_clim)
+
     if var_key == "precipitation":
         # Convert ERA5 from meters to mm
         ds_a[cfg["era5_var"]] = ds_a[cfg["era5_var"]] * 1000
@@ -108,20 +111,20 @@ def load_datasets(var_key):
         ds_b[cfg["cmip6_var"]] = ds_b[cfg["cmip6_var"]] * 86400
         ds_clim[cfg["cmip6_var"]] = ds_clim[cfg["cmip6_var"]] * 86400
 
-        # Recompute relative difference in app: (CMIP6 - ERA5) / ERA5 * 100
-        era5_clim_path = (
-            f"{BUCKET}/era5_land/climatologies/precipitation_mean_1971-2010.zarr"
-        )
-        ds_era5_clim = xr.open_zarr(fs.get_mapper(era5_clim_path)).load()
-        ds_era5_clim = standardize_dims(ds_era5_clim)
+        era5_vals = ds_era5_clim[cfg["era5_var"]] * 1000
+        cmip6_vals = ds_clim[cfg["cmip6_var"]]
 
-        era5_mm = ds_era5_clim[cfg["era5_var"]] * 1000
-        cmip6_mm = ds_clim[cfg["cmip6_var"]]
+        diff_val = (cmip6_vals - era5_vals) / era5_vals * 100
+        ds_diff[cfg["diff_var"]] = diff_val
+    elif var_key == "temperature":
+        era5_vals = ds_era5_clim[cfg["era5_var"]]
+        cmip6_vals = ds_clim[cfg["cmip6_var"]]
 
-        diff_val = (cmip6_mm - era5_mm) / era5_mm * 100
+        diff_val = cmip6_vals - era5_vals
         ds_diff[cfg["diff_var"]] = diff_val
 
     return ds_a, ds_b, ds_clim, ds_diff
+
 
 
 # --- UI ---
