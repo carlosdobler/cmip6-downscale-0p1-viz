@@ -279,12 +279,10 @@ def server(input, output, session):
             lon=slice(lon_c - disp_half - eps, lon_c + disp_half + eps),
         )
 
-        lat_min = float(crop_b.lat.min())
-        lat_max = float(crop_b.lat.max())
-        lon_min = float(crop_b.lon.min())
-        lon_max = float(crop_b.lon.max())
+        # Return fixed extent based on center, not data availability
+        extent = (lat_c - disp_half, lat_c + disp_half, lon_c - disp_half, lon_c + disp_half)
 
-        return crop_b, crop_d, (lat_min, lat_max, lon_min, lon_max)
+        return crop_b, crop_d, extent
 
     @reactive.Calc
     def single_timestep():
@@ -307,12 +305,10 @@ def server(input, output, session):
             lon=slice(lon_c - disp_half - eps, lon_c + disp_half + eps),
         ).compute()
 
-        lat_min = float(da_crop.lat.min())
-        lat_max = float(da_crop.lat.max())
-        lon_min = float(da_crop.lon.min())
-        lon_max = float(da_crop.lon.max())
+        # Return fixed extent based on center, not data availability
+        extent = (lat_c - disp_half, lat_c + disp_half, lon_c - disp_half, lon_c + disp_half)
 
-        return da_crop, da_crop.time.values, (lat_min, lat_max, lon_min, lon_max)
+        return da_crop, da_crop.time.values, extent
 
     @reactive.Calc
     @reactive.event(input.compute_density)
@@ -336,7 +332,9 @@ def server(input, output, session):
         return ts_a.values, ts_b.values, lat_c, lon_c
 
     def render_map(da, extent, title, vmin, vmax, cmap, cbar_label, units):
-        fig, ax = plt.subplots(figsize=(16, 12))
+        # Use a square figure size to minimize empty space
+        fig, ax = plt.subplots(figsize=(10, 10))
+        
         lat_min, lat_max, lon_min, lon_max = extent
 
         if "lat" in da.dims and da.lat[0] > da.lat[-1]:
@@ -355,6 +353,7 @@ def server(input, output, session):
         img_lon_min = float(da.lon.min()) - res / 2
         img_lon_max = float(da.lon.max()) + res / 2
 
+        # Use aspect="equal" to ensure 1deg lat == 1deg lon
         im = ax.imshow(
             arr,
             origin="lower",
@@ -363,22 +362,32 @@ def server(input, output, session):
             vmin=vmin,
             vmax=vmax,
             cmap=cmap,
+            interpolation="nearest",
         )
 
+        # Enforce perfectly square geographic limits early
+        ax.set_xlim(lon_min, lon_max)
+        ax.set_ylim(lat_min, lat_max)
+        ax.set_aspect("equal")
+
+        # Overlay layers: Check for empty and reset aspect after each plot
+        # because geopandas .plot() overrides ax.set_aspect internally
         coast_clip = gdf_coast.cx[lon_min:lon_max, lat_min:lat_max]
         if not coast_clip.empty:
             coast_clip.plot(ax=ax, color="#555555", linewidth=0.8)
+            ax.set_aspect("equal")
 
         admin_clip = gdf_admin.cx[lon_min:lon_max, lat_min:lat_max]
         if not admin_clip.empty:
             admin_clip.plot(ax=ax, facecolor="none", edgecolor="#555555", linewidth=0.8)
+            ax.set_aspect("equal")
 
         visible_cities = gdf_cities.cx[lon_min:lon_max, lat_min:lat_max]
         visible_cities = visible_cities[visible_cities["POP_MAX"] >= MIN_CITY_POP]
 
         for idx, row in visible_cities.iterrows():
             ax.plot(row.geometry.x, row.geometry.y, "k.", markersize=1)
-            ax.text(row.geometry.x, row.geometry.y, row["NAME"], fontsize=7, alpha=0.8)
+            ax.text(row.geometry.x, row.geometry.y, row["NAME"], fontsize=9, alpha=0.8)
 
         lat_c, lon_c = center.get()
         ax.plot(lon_c, lat_c, "r+", markersize=15)
@@ -390,19 +399,18 @@ def server(input, output, session):
             caption = "Value at crosshairs: N/A"
 
         cbar = plt.colorbar(im, ax=ax, orientation="vertical", fraction=0.046, pad=0.04)
-        cbar.ax.tick_params(labelsize=9)
-        cbar.ax.set_title(cbar_label, fontsize=9, pad=10)
+        cbar.ax.tick_params(labelsize=10)
+        cbar.ax.set_title(cbar_label, fontsize=10, pad=10)
 
-        ax.set_xlim(lon_min, lon_max)
-        ax.set_ylim(lat_min, lat_max)
         if title:
-            ax.set_title(title, fontsize=11, pad=10)
+            ax.set_title(title, fontsize=12, pad=10)
 
-        ax.tick_params(axis="both", labelsize=9)
-        ax.set_xlabel(caption, fontsize=10, labelpad=10)
+        ax.tick_params(axis="both", labelsize=10)
+        ax.set_xlabel(caption, fontsize=11, labelpad=10)
         ax.set_ylabel("")
 
-        fig.tight_layout(pad=10.0)
+        # tight_layout with a small padding to maximize map area while keeping labels
+        fig.tight_layout(pad=1.5)
         return fig
 
     @output
