@@ -100,6 +100,11 @@ def load_datasets(var_key):
     ds_a = ds_a.sel(time=slice("1971-01-01", "2025-12-31"))
     ds_b = ds_b.sel(time=slice("1971-01-01", "2025-12-31"))
 
+    if var_key == "precipitation":
+        # Convert CMIP6 precipitation from kg m-2 s-1 (mm/s) to mm/day
+        ds_b[cfg["cmip6_var"]] = ds_b[cfg["cmip6_var"]] * 86400
+        ds_clim[cfg["cmip6_var"]] = ds_clim[cfg["cmip6_var"]] * 86400
+
     return ds_a, ds_b, ds_clim, ds_diff
 
 
@@ -110,38 +115,16 @@ app_ui = ui.page_fluid(
     ui.card(
         ui.row(
             ui.column(
-                3,
+                4,
                 ui.input_select(
                     "variable",
                     "Climate Variable",
                     {k: v["label"] for k, v in VARS_CONFIG.items()},
                 ),
             ),
-            ui.column(2, ui.input_numeric("lat", "Latitude", 0.0, step=0.1)),
-            ui.column(2, ui.input_numeric("lon", "Longitude", 0.0, step=0.1)),
+            ui.column(3, ui.input_numeric("lat", "Latitude", 0.0, step=0.1)),
+            ui.column(3, ui.input_numeric("lon", "Longitude", 0.0, step=0.1)),
             ui.column(2, ui.input_action_button("go", "Go", class_="btn-primary")),
-            ui.column(
-                3,
-                ui.div(
-                    ui.row(
-                        ui.column(
-                            6, ui.input_action_button("up", "↑", class_="btn-sm")
-                        ),
-                        ui.column(
-                            6, ui.input_action_button("down", "↓", class_="btn-sm")
-                        ),
-                    ),
-                    ui.row(
-                        ui.column(
-                            6, ui.input_action_button("left", "←", class_="btn-sm")
-                        ),
-                        ui.column(
-                            6, ui.input_action_button("right", "→", class_="btn-sm")
-                        ),
-                    ),
-                    style="width: 100px;",
-                ),
-            ),
         )
     ),
     # Section 2: Single timestep map
@@ -149,21 +132,17 @@ app_ui = ui.page_fluid(
         ui.row(
             ui.column(
                 3,
-                ui.input_date("date", "Date", value="2010-08-01", max="2025-12-31"),
+                ui.input_date("date", "Date", value="1971-01-01", max="2025-12-31"),
                 ui.input_action_button("random_date", "Random date"),
-                ui.hr(),
-                ui.input_action_button(
-                    "load_timestep", "Load map", class_="btn-success"
-                ),
             ),
-            ui.column(6, ui.output_plot("plot_timestep", height="500px")),
+            ui.column(6, ui.output_plot("plot_timestep", height="650px")),
         )
     ),
     # Section 3: Climatological mean and diff maps
     ui.card(
         ui.row(
-            ui.column(6, ui.output_plot("plot_clim_b", height="500px")),
-            ui.column(6, ui.output_plot("plot_diff", height="500px")),
+            ui.column(6, ui.output_plot("plot_clim_b", height="650px")),
+            ui.column(6, ui.output_plot("plot_diff", height="650px")),
         )
     ),
     # Section 4: Density plots
@@ -189,8 +168,8 @@ def server(input, output, session):
     cache_b = reactive.Value(None)  # Downscaled Clim mean cache
     cache_diff = reactive.Value(None)  # Diff cache
 
-    # Currently loaded date for Section 2
-    loaded_date = reactive.Value(None)
+    # Trigger for single timestep map update
+    trigger_timestep = reactive.Value(0)
 
     # Current active datasets (lazy and pre-loaded)
     ds_lazy_a = reactive.Value(None)
@@ -208,6 +187,7 @@ def server(input, output, session):
         ds_full_clim.set(clim)
         ds_full_diff.set(diff)
         update_cache(center.get())
+        trigger_timestep.set(trigger_timestep.get() + 1)
 
     def update_cache(new_center):
         lat_c, lon_c = new_center
@@ -236,6 +216,7 @@ def server(input, output, session):
     @reactive.event(input.go)
     def _():
         update_cache((input.lat(), input.lon()))
+        trigger_timestep.set(trigger_timestep.get() + 1)
 
     @reactive.Effect
     @reactive.event(input.random_date)
@@ -245,61 +226,8 @@ def server(input, output, session):
             rand_time = np.random.choice(times)
             dt = pd.to_datetime(rand_time)
             ui.update_date("date", value=dt.strftime("%Y-%m-%d"))
-
-    @reactive.Effect
-    @reactive.event(input.load_timestep)
-    def _():
-        loaded_date.set(input.date())
-
-    # Arrow logic
-    def move_center(dlat, dlon):
-        res = 0.1
-        curr_lat, curr_lon = center.get()
-        new_lat, new_lon = curr_lat + dlat * res, curr_lon + dlon * res
-
-        # Check if new display window fits in cache with at least one cell margin
-        cache_lat, cache_lon = cache_center.get()
-        margin = 1 * res
-        disp_half = DISPLAY_CELLS * res
-
-        cache_lat_min = cache_lat - (DISPLAY_CELLS + CACHE_PADDING) * res
-        cache_lat_max = cache_lat + (DISPLAY_CELLS + CACHE_PADDING) * res
-        cache_lon_min = cache_lon - (DISPLAY_CELLS + CACHE_PADDING) * res
-        cache_lon_max = cache_lon + (DISPLAY_CELLS + CACHE_PADDING) * res
-
-        if (
-            new_lat - disp_half >= cache_lat_min + margin
-            and new_lat + disp_half <= cache_lat_max - margin
-            and new_lon - disp_half >= cache_lon_min + margin
-            and new_lon + disp_half <= cache_lon_max - margin
-        ):
-            center.set((new_lat, new_lon))
-            ui.update_numeric("lat", value=new_lat)
-            ui.update_numeric("lon", value=new_lon)
-        else:
-            update_cache((new_lat, new_lon))
-            ui.update_numeric("lat", value=new_lat)
-            ui.update_numeric("lon", value=new_lon)
-
-    @reactive.Effect
-    @reactive.event(input.up)
-    def _():
-        move_center(1, 0)
-
-    @reactive.Effect
-    @reactive.event(input.down)
-    def _():
-        move_center(-1, 0)
-
-    @reactive.Effect
-    @reactive.event(input.left)
-    def _():
-        move_center(0, -1)
-
-    @reactive.Effect
-    @reactive.event(input.right)
-    def _():
-        move_center(0, 1)
+            # update_date happens in next tick, but we can trigger update now
+            trigger_timestep.set(trigger_timestep.get() + 1)
 
     @reactive.Calc
     def display_crop():
@@ -328,11 +256,14 @@ def server(input, output, session):
 
     @reactive.Calc
     def single_timestep():
-        if ds_lazy_b.get() is None or loaded_date.get() is None:
+        trigger_timestep()  # Dependency on trigger
+        if ds_lazy_b.get() is None:
             return None
 
         lat_c, lon_c = center.get()
-        sel_date = loaded_date.get()
+        # Use input.date() directly. Note: if updated via random_date, it might be stale 
+        # for a brief moment, but shiny handles this.
+        sel_date = input.date()
 
         res = 0.1
         disp_half = DISPLAY_CELLS * res
@@ -374,7 +305,7 @@ def server(input, output, session):
 
         return ts_a.values, ts_b.values, lat_c, lon_c
 
-    def render_map(da, extent, title, vmin, vmax, cmap, var_name):
+    def render_map(da, extent, title, vmin, vmax, cmap, var_name, units):
         fig, ax = plt.subplots(figsize=(12, 9))
         lat_min, lat_max, lon_min, lon_max = extent
 
@@ -449,13 +380,19 @@ def server(input, output, session):
         lat_c, lon_c = center.get()
         ax.plot(lon_c, lat_c, "r+", markersize=15)
 
+        try:
+            val = float(da.sel(lat=lat_c, lon=lon_c, method="nearest").values)
+            caption = f"Value at crosshairs: {val:.2f} {units}"
+        except Exception:
+            caption = "Value at crosshairs: N/A"
+
         plt.colorbar(im, ax=ax, label=f"{var_name}", fraction=0.046, pad=0.04)
         ax.set_xlim(lon_min, lon_max)
         ax.set_ylim(lat_min, lat_max)
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("")
+        ax.set_xlabel(caption, fontsize=12, labelpad=10)
         ax.set_ylabel("")
-        ax.tick_params(labelbottom=False, labelleft=False)
+        # ax.tick_params(labelbottom=False, labelleft=False) # Removed so coordinate labels show
         return fig
 
     @output
@@ -464,7 +401,7 @@ def server(input, output, session):
         data = single_timestep()
         if data is None:
             fig, ax = plt.subplots()
-            ax.text(0.5, 0.5, "Select a date and click 'Load map'", ha="center")
+            ax.text(0.5, 0.5, "Click 'Go' or 'Random date' to show map", ha="center")
             return fig
         da, ts, extent = data
         cfg = VARS_CONFIG[input.variable()]
@@ -477,6 +414,7 @@ def server(input, output, session):
             None,
             "viridis",
             cfg["label"],
+            cfg["units"],
         )
 
     @output
@@ -496,6 +434,7 @@ def server(input, output, session):
             None,
             "viridis",
             cfg["label"],
+            cfg["units"],
         )
 
     @output
@@ -516,7 +455,8 @@ def server(input, output, session):
             -vmax,
             vmax,
             "RdBu_r",
-            f"Diff ({cfg['units']})",
+            f"Diff ({cfg['diff_units']})",
+            cfg["diff_units"],
         )
 
     @output
