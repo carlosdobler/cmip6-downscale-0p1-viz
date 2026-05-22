@@ -107,15 +107,17 @@ def load_datasets(var_key):
         # Convert CMIP6 precipitation from kg m-2 s-1 (mm/s) to mm/day
         ds_b[cfg["cmip6_var"]] = ds_b[cfg["cmip6_var"]] * 86400
         ds_clim[cfg["cmip6_var"]] = ds_clim[cfg["cmip6_var"]] * 86400
-        
+
         # Recompute relative difference in app: (CMIP6 - ERA5) / ERA5 * 100
-        era5_clim_path = f"{BUCKET}/era5_land/climatologies/precipitation_mean_1971-2010.zarr"
+        era5_clim_path = (
+            f"{BUCKET}/era5_land/climatologies/precipitation_mean_1971-2010.zarr"
+        )
         ds_era5_clim = xr.open_zarr(fs.get_mapper(era5_clim_path)).load()
         ds_era5_clim = standardize_dims(ds_era5_clim)
-        
+
         era5_mm = ds_era5_clim[cfg["era5_var"]] * 1000
         cmip6_mm = ds_clim[cfg["cmip6_var"]]
-        
+
         diff_val = (cmip6_mm - era5_mm) / era5_mm * 100
         ds_diff[cfg["diff_var"]] = diff_val
 
@@ -280,7 +282,12 @@ def server(input, output, session):
         )
 
         # Return fixed extent based on center, not data availability
-        extent = (lat_c - disp_half, lat_c + disp_half, lon_c - disp_half, lon_c + disp_half)
+        extent = (
+            lat_c - disp_half,
+            lat_c + disp_half,
+            lon_c - disp_half,
+            lon_c + disp_half,
+        )
 
         return crop_b, crop_d, extent
 
@@ -306,7 +313,12 @@ def server(input, output, session):
         ).compute()
 
         # Return fixed extent based on center, not data availability
-        extent = (lat_c - disp_half, lat_c + disp_half, lon_c - disp_half, lon_c + disp_half)
+        extent = (
+            lat_c - disp_half,
+            lat_c + disp_half,
+            lon_c - disp_half,
+            lon_c + disp_half,
+        )
 
         return da_crop, da_crop.time.values, extent
 
@@ -334,7 +346,8 @@ def server(input, output, session):
     def render_map(da, extent, title, vmin, vmax, cmap, cbar_label, units):
         # Use a square figure size to minimize empty space
         fig, ax = plt.subplots(figsize=(10, 10))
-        
+        fig.subplots_adjust(left=0.1, right=0.88, top=0.95, bottom=0.05)
+
         lat_min, lat_max, lon_min, lon_max = extent
 
         if "lat" in da.dims and da.lat[0] > da.lat[-1]:
@@ -344,7 +357,14 @@ def server(input, output, session):
 
         arr = np.array(da)
         if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] == 0:
-            ax.text(0.5, 0.5, "No data in this region", ha="center", va="center", transform=ax.transAxes)
+            ax.text(
+                0.5,
+                0.5,
+                "No data in this region",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
             return fig
 
         res = abs(float(da.lat[1] - da.lat[0])) if da.lat.size > 1 else 0.1
@@ -386,8 +406,15 @@ def server(input, output, session):
         visible_cities = visible_cities[visible_cities["POP_MAX"] >= MIN_CITY_POP]
 
         for idx, row in visible_cities.iterrows():
-            ax.plot(row.geometry.x, row.geometry.y, "k.", markersize=1)
-            ax.text(row.geometry.x, row.geometry.y, row["NAME"], fontsize=9, alpha=0.8)
+            ax.text(
+                row.geometry.x,
+                row.geometry.y,
+                row["NAME"],
+                fontsize=9,
+                alpha=0.8,
+                ha="center",
+                va="center",
+            )
 
         lat_c, lon_c = center.get()
         ax.plot(lon_c, lat_c, "r+", markersize=15)
@@ -398,19 +425,21 @@ def server(input, output, session):
         except Exception:
             caption = "Value at crosshairs: N/A"
 
-        cbar = plt.colorbar(im, ax=ax, orientation="vertical", fraction=0.046, pad=0.04)
-        cbar.ax.tick_params(labelsize=10)
-        cbar.ax.set_title(cbar_label, fontsize=10, pad=10)
+        cbar = plt.colorbar(
+            im, ax=ax, orientation="vertical", fraction=0.03, pad=0.05, shrink=0.85
+        )
+        cbar.ax.tick_params(labelsize=9)
+        cbar.ax.set_title(cbar_label, fontsize=9, pad=10)
 
         if title:
             ax.set_title(title, fontsize=12, pad=10)
 
-        ax.tick_params(axis="both", labelsize=10)
+        ax.tick_params(axis="both", labelsize=9)
         ax.set_xlabel(caption, fontsize=11, labelpad=10)
         ax.set_ylabel("")
 
-        # tight_layout with a small padding to maximize map area while keeping labels
-        fig.tight_layout(pad=1.5)
+        # tight_layout with a slightly larger padding to ensure labels aren't cropped
+        fig.tight_layout(pad=3.0)
         return fig
 
     @output
@@ -423,28 +452,50 @@ def server(input, output, session):
             return fig
         da, ts, extent = data
         cfg = VARS_CONFIG[input.variable()]
-        return render_map(da, extent, "", None, None, "viridis", cfg["units"], cfg["units"])
+        return render_map(
+            da, extent, "", None, None, "viridis", cfg["units"], cfg["units"]
+        )
 
     @output
     @render.plot
     def plot_clim_b():
         data = display_crop()
-        if data is None: return None
+        if data is None:
+            return None
         crop_b, _, extent = data
         cfg = VARS_CONFIG[input.variable()]
         da = crop_b[cfg["cmip6_var"]]
-        return render_map(da, extent, "Downscaled Climatology (1971-2010)", None, None, "viridis", cfg["units"], cfg["units"])
+        return render_map(
+            da,
+            extent,
+            "Downscaled Climatology (1971-2010)",
+            None,
+            None,
+            "viridis",
+            cfg["units"],
+            cfg["units"],
+        )
 
     @output
     @render.plot
     def plot_diff():
         data = display_crop()
-        if data is None: return None
+        if data is None:
+            return None
         _, crop_d, extent = data
         cfg = VARS_CONFIG[input.variable()]
         da = crop_d[cfg["diff_var"]]
         vmax = max(abs(da.min().values), abs(da.max().values))
-        return render_map(da, extent, "Difference (Downscaled - ERA5)", -vmax, vmax, "RdBu_r", f"Diff ({cfg['diff_units']})", cfg["diff_units"])
+        return render_map(
+            da,
+            extent,
+            "Difference (Downscaled - ERA5)",
+            -vmax,
+            vmax,
+            "RdBu_r",
+            f"Diff ({cfg['diff_units']})",
+            cfg["diff_units"],
+        )
 
     @output
     @render.plot
@@ -452,7 +503,9 @@ def server(input, output, session):
         data = center_density()
         if data is None:
             fig, ax = plt.subplots()
-            ax.text(0.5, 0.5, "Press 'Compute distributions' to show results", ha="center")
+            ax.text(
+                0.5, 0.5, "Press 'Compute distributions' to show results", ha="center"
+            )
             return fig
 
         ts_a, ts_b, lat_c, lon_c = data
@@ -499,7 +552,7 @@ def server(input, output, session):
             x_grid = np.linspace(x_min, x_max, 500)
             kde_a, kde_b = (
                 gaussian_kde(ts_a, bw_method=KDE_BANDWIDTH),
-                gaussian_kde(ts_b, bw_method=KDE_BANDWIDTH)
+                gaussian_kde(ts_b, bw_method=KDE_BANDWIDTH),
             )
             y_a, y_b = kde_a(x_grid), kde_b(x_grid)
             ax.fill_between(x_grid, y_a, alpha=0.4, color="#1f77b4", label="ERA5-Land")
@@ -532,8 +585,8 @@ def server(input, output, session):
 
         if is_pr:
             row1_label = "Dry days (<1mm)"
-            row1_a = f"{np.mean(ts_a <= 1.0)*100:.1f}%"
-            row1_b = f"{np.mean(ts_b <= 1.0)*100:.1f}%"
+            row1_a = f"{np.mean(ts_a <= 1.0) * 100:.1f}%"
+            row1_b = f"{np.mean(ts_b <= 1.0) * 100:.1f}%"
             row2_label = "Max (mm/d)"
             row2_a = f"{np.max(ts_a):.1f}"
             row2_b = f"{np.max(ts_b):.1f}"
