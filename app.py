@@ -4,15 +4,16 @@ import xarray as xr
 import gcsfs
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 from scipy.stats import gaussian_kde
 from shiny import App, reactive, render, ui
 
 # --- Constants ---
 BUCKET = "clim_data_reg_useast1"
-DISPLAY_CELLS = 40
+DISPLAY_CELLS = 60
 CACHE_PADDING = 10
 MIN_CITY_POP = 500_000
-KDE_BANDWIDTH = 0.3
+KDE_BANDWIDTH = 0.05
 
 # --- Variable configuration ---
 VARS_CONFIG = {
@@ -101,61 +102,92 @@ def load_datasets(var_key):
     ds_b = ds_b.sel(time=slice("1971-01-01", "2025-12-31"))
 
     if var_key == "precipitation":
+        # Convert ERA5 from meters to mm
+        ds_a[cfg["era5_var"]] = ds_a[cfg["era5_var"]] * 1000
         # Convert CMIP6 precipitation from kg m-2 s-1 (mm/s) to mm/day
         ds_b[cfg["cmip6_var"]] = ds_b[cfg["cmip6_var"]] * 86400
         ds_clim[cfg["cmip6_var"]] = ds_clim[cfg["cmip6_var"]] * 86400
+        
+        # Recompute relative difference in app: (CMIP6 - ERA5) / ERA5 * 100
+        era5_clim_path = f"{BUCKET}/era5_land/climatologies/precipitation_mean_1971-2010.zarr"
+        ds_era5_clim = xr.open_zarr(fs.get_mapper(era5_clim_path)).load()
+        ds_era5_clim = standardize_dims(ds_era5_clim)
+        
+        era5_mm = ds_era5_clim[cfg["era5_var"]] * 1000
+        cmip6_mm = ds_clim[cfg["cmip6_var"]]
+        
+        diff_val = (cmip6_mm - era5_mm) / era5_mm * 100
+        ds_diff[cfg["diff_var"]] = diff_val
 
     return ds_a, ds_b, ds_clim, ds_diff
 
 
 # --- UI ---
 app_ui = ui.page_fluid(
-    ui.h2("Climate Data Comparison Dashboard"),
+    ui.h2("Climate Data Comparison Dashboard", style="text-align: center;"),
     # Section 1: Variable and location
-    ui.card(
-        ui.row(
-            ui.column(
-                4,
-                ui.input_select(
-                    "variable",
-                    "Climate Variable",
-                    {k: v["label"] for k, v in VARS_CONFIG.items()},
+    ui.div(
+        ui.card(
+            ui.row(
+                ui.column(
+                    4,
+                    ui.input_select(
+                        "variable",
+                        "Climate Variable",
+                        {k: v["label"] for k, v in VARS_CONFIG.items()},
+                    ),
                 ),
-            ),
-            ui.column(3, ui.input_numeric("lat", "Latitude", 0.0, step=0.1)),
-            ui.column(3, ui.input_numeric("lon", "Longitude", 0.0, step=0.1)),
-            ui.column(2, ui.input_action_button("go", "Go", class_="btn-primary")),
-        )
+                ui.column(3, ui.input_numeric("lat", "Latitude", 46.0, step=0.1)),
+                ui.column(3, ui.input_numeric("lon", "Longitude", 8.2, step=0.1)),
+                ui.column(2, ui.input_action_button("go", "Go", class_="btn-primary")),
+            )
+        ),
+        style="max-width: 1200px; margin: 0 auto;",
     ),
     # Section 2: Single timestep map
-    ui.card(
-        ui.row(
-            ui.column(
-                3,
-                ui.input_date("date", "Date", value="1971-01-01", max="2025-12-31"),
-                ui.input_action_button("random_date", "Random date"),
-            ),
-            ui.column(6, ui.output_plot("plot_timestep", height="650px")),
-        )
+    ui.div(
+        ui.card(
+            ui.row(
+                ui.column(
+                    3,
+                    ui.input_date("date", "Date", value="1971-01-01", max="2025-12-31"),
+                    ui.input_action_button("random_date", "Random date"),
+                ),
+                ui.column(6, ui.output_plot("plot_timestep", height="600px")),
+            )
+        ),
+        style="max-width: 1200px; margin: 0 auto;",
     ),
     # Section 3: Climatological mean and diff maps
-    ui.card(
-        ui.row(
-            ui.column(6, ui.output_plot("plot_clim_b", height="650px")),
-            ui.column(6, ui.output_plot("plot_diff", height="650px")),
-        )
+    ui.div(
+        ui.card(
+            ui.row(
+                ui.column(6, ui.output_plot("plot_clim_b", height="600px")),
+                ui.column(6, ui.output_plot("plot_diff", height="600px")),
+            )
+        ),
+        style="max-width: 1200px; margin: 0 auto;",
     ),
-    # Section 4: Density plots
-    ui.card(
-        ui.row(
-            ui.column(9, ui.output_plot("plot_density", height="400px")),
-            ui.column(
-                3,
-                ui.input_action_button(
-                    "compute_density", "Compute densities", class_="btn-info"
+    # Section 4: Distribution plots
+    ui.div(
+        ui.card(
+            ui.row(
+                ui.column(9, ui.output_plot("plot_density", height="400px")),
+                ui.column(
+                    3,
+                    ui.div(
+                        ui.input_action_button(
+                            "compute_density",
+                            "Compute distributions",
+                            class_="btn-info w-100",
+                        ),
+                        ui.div(ui.output_ui("output_stats"), style="margin-top: 20px;"),
+                        style="padding-top: 20px;",
+                    ),
                 ),
-            ),
-        )
+            )
+        ),
+        style="max-width: 1200px; margin: 0 auto;",
     ),
 )
 
@@ -163,7 +195,7 @@ app_ui = ui.page_fluid(
 # --- Server ---
 def server(input, output, session):
     # Reactive values for state
-    center = reactive.Value((0.0, 0.0))
+    center = reactive.Value((46.0, 8.2))
     cache_center = reactive.Value(None)
     cache_b = reactive.Value(None)  # Downscaled Clim mean cache
     cache_diff = reactive.Value(None)  # Diff cache
@@ -261,8 +293,6 @@ def server(input, output, session):
             return None
 
         lat_c, lon_c = center.get()
-        # Use input.date() directly. Note: if updated via random_date, it might be stale 
-        # for a brief moment, but shiny handles this.
         sel_date = input.date()
 
         res = 0.1
@@ -305,15 +335,10 @@ def server(input, output, session):
 
         return ts_a.values, ts_b.values, lat_c, lon_c
 
-    def render_map(da, extent, title, vmin, vmax, cmap, var_name, units):
-        fig, ax = plt.subplots(figsize=(12, 9))
+    def render_map(da, extent, title, vmin, vmax, cmap, cbar_label, units):
+        fig, ax = plt.subplots(figsize=(16, 12))
         lat_min, lat_max, lon_min, lon_max = extent
 
-        # Ensure lat is ascending and dimensions are in (lat, lon) order before
-        # converting to numpy. If the zarr stores dimensions in a different order
-        # (e.g. lon, lat) or with descending lat, imshow gets a shape mismatch
-        # against the declared extent — matplotlib then computes a zero or negative
-        # image height and raises "aspect must be finite and positive".
         if "lat" in da.dims and da.lat[0] > da.lat[-1]:
             da = da.sortby("lat")
         if da.dims != ("lat", "lon"):
@@ -321,21 +346,9 @@ def server(input, output, session):
 
         arr = np.array(da)
         if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] == 0:
-            ax.text(
-                0.5,
-                0.5,
-                "No data in this region",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            ax.set_title(title, fontsize=14)
+            ax.text(0.5, 0.5, "No data in this region", ha="center", va="center", transform=ax.transAxes)
             return fig
 
-        # Derive imshow extent from the DataArray's actual coordinates,
-        # expanded by half a cell so the image fills edge-to-edge rather than
-        # center-to-center.  This is what prevents a degenerate (zero-height)
-        # image when the coordinate range is very small.
         res = abs(float(da.lat[1] - da.lat[0])) if da.lat.size > 1 else 0.1
         img_lat_min = float(da.lat.min()) - res / 2
         img_lat_max = float(da.lat.max()) + res / 2
@@ -346,28 +359,19 @@ def server(input, output, session):
             arr,
             origin="lower",
             extent=[img_lon_min, img_lon_max, img_lat_min, img_lat_max],
-            aspect="auto",
+            aspect="equal",
             vmin=vmin,
             vmax=vmax,
             cmap=cmap,
         )
 
-        # Set aspect BEFORE geopandas .plot() calls.
-        # Geopandas internally calls ax.set_aspect(1 / cos(y_mean * pi/180)).
-        # When the clipped GeoDataFrame is empty, y_mean is nan → crash.
-        # Pre-setting "auto" is overridden by geopandas, so we also need
-        # the empty-check guards below.
-        ax.set_aspect("auto")
-
         coast_clip = gdf_coast.cx[lon_min:lon_max, lat_min:lat_max]
         if not coast_clip.empty:
             coast_clip.plot(ax=ax, color="#555555", linewidth=0.8)
-            ax.set_aspect("auto")
 
         admin_clip = gdf_admin.cx[lon_min:lon_max, lat_min:lat_max]
         if not admin_clip.empty:
             admin_clip.plot(ax=ax, facecolor="none", edgecolor="#555555", linewidth=0.8)
-            ax.set_aspect("auto")
 
         visible_cities = gdf_cities.cx[lon_min:lon_max, lat_min:lat_max]
         visible_cities = visible_cities[visible_cities["POP_MAX"] >= MIN_CITY_POP]
@@ -376,7 +380,6 @@ def server(input, output, session):
             ax.plot(row.geometry.x, row.geometry.y, "k.", markersize=1)
             ax.text(row.geometry.x, row.geometry.y, row["NAME"], fontsize=7, alpha=0.8)
 
-        # Crosshair
         lat_c, lon_c = center.get()
         ax.plot(lon_c, lat_c, "r+", markersize=15)
 
@@ -386,13 +389,20 @@ def server(input, output, session):
         except Exception:
             caption = "Value at crosshairs: N/A"
 
-        plt.colorbar(im, ax=ax, label=f"{var_name}", fraction=0.046, pad=0.04)
+        cbar = plt.colorbar(im, ax=ax, orientation="vertical", fraction=0.046, pad=0.04)
+        cbar.ax.tick_params(labelsize=9)
+        cbar.ax.set_title(cbar_label, fontsize=9, pad=10)
+
         ax.set_xlim(lon_min, lon_max)
         ax.set_ylim(lat_min, lat_max)
-        ax.set_title(title, fontsize=14)
-        ax.set_xlabel(caption, fontsize=12, labelpad=10)
+        if title:
+            ax.set_title(title, fontsize=11, pad=10)
+
+        ax.tick_params(axis="both", labelsize=9)
+        ax.set_xlabel(caption, fontsize=10, labelpad=10)
         ax.set_ylabel("")
-        # ax.tick_params(labelbottom=False, labelleft=False) # Removed so coordinate labels show
+
+        fig.tight_layout(pad=10.0)
         return fig
 
     @output
@@ -405,59 +415,28 @@ def server(input, output, session):
             return fig
         da, ts, extent = data
         cfg = VARS_CONFIG[input.variable()]
-        dt_str = pd.to_datetime(ts).strftime("%Y-%m-%d")
-        return render_map(
-            da,
-            extent,
-            f"Downscaled data — {dt_str}",
-            None,
-            None,
-            "viridis",
-            cfg["label"],
-            cfg["units"],
-        )
+        return render_map(da, extent, "", None, None, "viridis", cfg["units"], cfg["units"])
 
     @output
     @render.plot
     def plot_clim_b():
         data = display_crop()
-        if data is None:
-            return None
+        if data is None: return None
         crop_b, _, extent = data
         cfg = VARS_CONFIG[input.variable()]
         da = crop_b[cfg["cmip6_var"]]
-        return render_map(
-            da,
-            extent,
-            "Downscaled Climatology (1971-2010)",
-            None,
-            None,
-            "viridis",
-            cfg["label"],
-            cfg["units"],
-        )
+        return render_map(da, extent, "Downscaled Climatology (1971-2010)", None, None, "viridis", cfg["units"], cfg["units"])
 
     @output
     @render.plot
     def plot_diff():
         data = display_crop()
-        if data is None:
-            return None
+        if data is None: return None
         _, crop_d, extent = data
         cfg = VARS_CONFIG[input.variable()]
         da = crop_d[cfg["diff_var"]]
-        # Symmetric divergent range for diff
         vmax = max(abs(da.min().values), abs(da.max().values))
-        return render_map(
-            da,
-            extent,
-            "Difference (ERA5 - Downscaled)",
-            -vmax,
-            vmax,
-            "RdBu_r",
-            f"Diff ({cfg['diff_units']})",
-            cfg["diff_units"],
-        )
+        return render_map(da, extent, "Difference (Downscaled - ERA5)", -vmax, vmax, "RdBu_r", f"Diff ({cfg['diff_units']})", cfg["diff_units"])
 
     @output
     @render.plot
@@ -465,13 +444,12 @@ def server(input, output, session):
         data = center_density()
         if data is None:
             fig, ax = plt.subplots()
-            ax.text(0.5, 0.5, "Press 'Compute densities' to show results", ha="center")
+            ax.text(0.5, 0.5, "Press 'Compute distributions' to show results", ha="center")
             return fig
 
         ts_a, ts_b, lat_c, lon_c = data
         cfg = VARS_CONFIG[input.variable()]
 
-        # Remove NaNs if any
         ts_a = ts_a[~np.isnan(ts_a)]
         ts_b = ts_b[~np.isnan(ts_b)]
 
@@ -482,29 +460,108 @@ def server(input, output, session):
 
         fig, ax = plt.subplots(figsize=(8, 5))
 
-        x_min = min(ts_a.min(), ts_b.min())
-        x_max = max(ts_a.max(), ts_b.max())
-        x_grid = np.linspace(x_min, x_max, 500)
+        if input.variable() == "precipitation":
+            for ts, label, color in [
+                (ts_a, "ERA5-Land", "#1f77b4"),
+                (ts_b, "Downscaled data", "#ff7f0e"),
+            ]:
+                x = np.sort(ts)
+                y = np.arange(len(x), 0, -1) / len(x)
+                mask = x >= 1.0
+                prob_gt_1 = np.mean(ts > 1.0)
 
-        kde_a = gaussian_kde(ts_a, bw_method=KDE_BANDWIDTH)
-        kde_b = gaussian_kde(ts_b, bw_method=KDE_BANDWIDTH)
+                if np.any(mask):
+                    plot_x = np.insert(x[mask], 0, 1.0)
+                    plot_y = np.insert(y[mask], 0, prob_gt_1)
+                    ax.plot(plot_x, plot_y, label=label, color=color, linewidth=2)
+                else:
+                    ax.plot([], [], label=label, color=color)
 
-        y_a = kde_a(x_grid)
-        y_b = kde_b(x_grid)
+            ax.set_xscale("log")
+            ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
+            ax.xaxis.set_minor_formatter(ticker.NullFormatter())
+            ax.set_xlabel(f"{cfg['units']}")
+            ax.set_ylabel("Probability P(Value > x)")
+            ax.set_ylim(bottom=0)
+            all_vals = np.concatenate([ts_a, ts_b])
+            max_val = np.max(all_vals) if len(all_vals) > 0 else 10
+            ax.set_xlim(left=1, right=max(10, max_val * 1.1))
+        else:
+            x_min, x_max = min(ts_a.min(), ts_b.min()), max(ts_a.max(), ts_b.max())
+            x_grid = np.linspace(x_min, x_max, 500)
+            kde_a, kde_b = (
+                gaussian_kde(ts_a, bw_method=KDE_BANDWIDTH),
+                gaussian_kde(ts_b, bw_method=KDE_BANDWIDTH)
+            )
+            y_a, y_b = kde_a(x_grid), kde_b(x_grid)
+            ax.fill_between(x_grid, y_a, alpha=0.4, color="#1f77b4", label="ERA5-Land")
+            ax.plot(x_grid, y_a, color="#1f77b4", alpha=0.9)
+            ax.fill_between(
+                x_grid, y_b, alpha=0.4, color="#ff7f0e", label="Downscaled data"
+            )
+            ax.plot(x_grid, y_b, color="#ff7f0e", alpha=0.9)
+            ax.set_xlabel(f"{cfg['units']}")
+            ax.set_ylabel("Density")
 
-        ax.fill_between(x_grid, y_a, alpha=0.4, color="#1f77b4", label="ERA5-Land")
-        ax.plot(x_grid, y_a, color="#1f77b4", alpha=0.9)
-
-        ax.fill_between(
-            x_grid, y_b, alpha=0.4, color="#ff7f0e", label="Downscaled data"
-        )
-        ax.plot(x_grid, y_b, color="#ff7f0e", alpha=0.9)
-
-        ax.set_title(f"Density at ({lat_c:.2f}, {lon_c:.2f})")
-        ax.set_xlabel(f"{cfg['label']} ({cfg['units']})")
-        ax.set_ylabel("Density")
         ax.legend()
         return fig
+
+    @output
+    @render.ui
+    def output_stats():
+        data = center_density()
+        if data is None:
+            return ui.div()
+
+        ts_a, ts_b, _, _ = data
+        ts_a = ts_a[~np.isnan(ts_a)]
+        ts_b = ts_b[~np.isnan(ts_b)]
+
+        if len(ts_a) == 0 or len(ts_b) == 0:
+            return ui.div()
+
+        is_pr = input.variable() == "precipitation"
+
+        if is_pr:
+            row1_label = "Dry days (<1mm)"
+            row1_a = f"{np.mean(ts_a <= 1.0)*100:.1f}%"
+            row1_b = f"{np.mean(ts_b <= 1.0)*100:.1f}%"
+            row2_label = "Max (mm/d)"
+            row2_a = f"{np.max(ts_a):.1f}"
+            row2_b = f"{np.max(ts_b):.1f}"
+        else:
+            row1_label = "Min"
+            row1_a = f"{np.min(ts_a):.1f}"
+            row1_b = f"{np.min(ts_b):.1f}"
+            row2_label = "Max"
+            row2_a = f"{np.max(ts_a):.1f}"
+            row2_b = f"{np.max(ts_b):.1f}"
+
+        return ui.HTML(
+            f"""
+            <table class="table table-sm table-bordered" style="font-size: 0.85rem;">
+                <thead>
+                    <tr class="table-light">
+                        <th>Metric</th>
+                        <th>ERA5</th>
+                        <th>Down.</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>{row1_label}</strong></td>
+                        <td>{row1_a}</td>
+                        <td>{row1_b}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>{row2_label}</strong></td>
+                        <td>{row2_a}</td>
+                        <td>{row2_b}</td>
+                    </tr>
+                </tbody>
+            </table>
+        """
+        )
 
 
 app = App(app_ui, server)
