@@ -162,9 +162,9 @@ def load_datasets(var_key):
     ds_a = standardize_dims(ds_a)
     ds_b = standardize_dims(ds_b)
 
-    # Subset to 1971-2025
-    ds_a = ds_a.sel(time=slice("1971-01-01", "2025-12-31"))
-    ds_b = ds_b.sel(time=slice("1971-01-01", "2025-12-31"))
+    # Subset to 1971-2010
+    ds_a = ds_a.sel(time=slice("1971-01-01", "2010-12-31"))
+    ds_b = ds_b.sel(time=slice("1971-01-01", "2010-12-31"))
 
     # Load ERA5 Climatology for diff calculation
     ds_era5_clim = xr.open_zarr(fs.get_mapper(cfg["era5_clim_path"])).load()
@@ -200,7 +200,6 @@ def load_datasets(var_key):
     return ds_a, ds_b, ds_clim, ds_diff
 
 
-
 # --- UI ---
 app_ui = ui.page_fluid(
     ui.h2("Climate Data Comparison Dashboard", style="text-align: center;"),
@@ -229,7 +228,7 @@ app_ui = ui.page_fluid(
             ui.row(
                 ui.column(
                     3,
-                    ui.input_date("date", "Date", value="1971-01-01", max="2025-12-31"),
+                    ui.input_date("date", "Date", value="1971-01-01", max="2010-12-31"),
                     ui.input_action_button("random_date", "Random date"),
                 ),
                 ui.column(6, ui.output_plot("plot_timestep", height="600px")),
@@ -528,10 +527,10 @@ def server(input, output, session):
             return fig
         da, ts, extent = data
         cfg = VARS_CONFIG[input.variable()]
-        
+
         # Robust color scaling using 1st and 99th percentiles
         vmin, vmax = np.nanpercentile(da, [1, 99])
-        
+
         return render_map(
             da, extent, "", vmin, vmax, "viridis", cfg["units"], cfg["units"]
         )
@@ -545,10 +544,10 @@ def server(input, output, session):
         crop_b, _, extent = data
         cfg = VARS_CONFIG[input.variable()]
         da = crop_b[cfg["cmip6_var"]]
-        
+
         # Robust color scaling using 1st and 99th percentiles
         vmin, vmax = np.nanpercentile(da, [1, 99])
-        
+
         return render_map(
             da,
             extent,
