@@ -16,31 +16,98 @@ MIN_CITY_POP = 500_000
 KDE_BANDWIDTH = 0.05
 
 # --- Variable configuration ---
+CMIP6_MODEL = "MPI-ESM1-2-HR_ww-isimip_ssp585"
+
 VARS_CONFIG = {
-    "temperature": {
+    "tas": {
         "label": "Mean Temperature",
         "units": "K",
         "diff_units": "K",
         "diff_type": "absolute",
         "era5_path": f"{BUCKET}/era5_land/daily_aggregates/temperature_2m.zarr",
-        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/temperature_mean_1971-2010.zarr",
-        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/tas/tas_MPI-ESM1-2-HR_ww-isimip_ssp585_day.zarr",
-        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/temperature/temperature_MPI-ESM1-2-HR_ww-isimip_ssp585_mean_1971-2010.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/temperature-2m_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/tas/tas_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/tas/tas_{CMIP6_MODEL}_mean_1971-2010.zarr",
         "era5_var": "temperature_2m",
         "cmip6_var": "tas",
         "diff_var": "diff",
     },
-    "precipitation": {
+    "tasmax": {
+        "label": "Max Temperature",
+        "units": "K",
+        "diff_units": "K",
+        "diff_type": "absolute",
+        "era5_path": f"{BUCKET}/era5_land/daily_aggregates/temperature_2m_max.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/temperature-2m-max_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/tasmax/tasmax_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/tasmax/tasmax_{CMIP6_MODEL}_mean_1971-2010.zarr",
+        "era5_var": "temperature_2m_max",
+        "cmip6_var": "tasmax",
+        "diff_var": "diff",
+    },
+    "tasmin": {
+        "label": "Min Temperature",
+        "units": "K",
+        "diff_units": "K",
+        "diff_type": "absolute",
+        "era5_path": f"{BUCKET}/era5_land/daily_aggregates/temperature_2m_min.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/temperature-2m-min_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/tasmin/tasmin_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/tasmin/tasmin_{CMIP6_MODEL}_mean_1971-2010.zarr",
+        "era5_var": "temperature_2m_min",
+        "cmip6_var": "tasmin",
+        "diff_var": "diff",
+    },
+    "pr": {
         "label": "Precipitation",
         "units": "mm/day",
         "diff_units": "%",
         "diff_type": "relative",
         "era5_path": f"{BUCKET}/era5_land/daily_aggregates/total_precipitation_sum.zarr",
-        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/precipitation_mean_1971-2010.zarr",
-        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/pr/pr_MPI-ESM1-2-HR_ww-isimip_ssp585_day.zarr",
-        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/precipitation/precipitation_MPI-ESM1-2-HR_ww-isimip_ssp585_mean_1971-2010.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/total-precipitation-sum_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/pr/pr_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/pr/pr_{CMIP6_MODEL}_mean_1971-2010.zarr",
         "era5_var": "total_precipitation_sum",
         "cmip6_var": "pr",
+        "diff_var": "diff",
+    },
+    "hurs": {
+        "label": "Relative Humidity",
+        "units": "%",
+        "diff_units": "%",
+        "diff_type": "absolute",
+        "era5_path": f"{BUCKET}/era5_land/daily_aggregates/relative_humidity.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/relative-humidity_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/hurs/hurs_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/hurs/hurs_{CMIP6_MODEL}_mean_1971-2010.zarr",
+        "era5_var": "relative_humidity",
+        "cmip6_var": "hurs",
+        "diff_var": "diff",
+    },
+    "rsds": {
+        "label": "Solar Radiation",
+        "units": "W/m^2",
+        "diff_units": "%",
+        "diff_type": "relative",
+        "era5_path": f"{BUCKET}/era5_land/daily_aggregates/surface_solar_radiation_downwards_sum.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/surface-solar-radiation-downwards-sum_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/rsds/rsds_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/rsds/rsds_{CMIP6_MODEL}_mean_1971-2010.zarr",
+        "era5_var": "surface_solar_radiation_downwards_sum",
+        "cmip6_var": "rsds",
+        "diff_var": "diff",
+    },
+    "sfcwind": {
+        "label": "Wind Speed",
+        "units": "m/s",
+        "diff_units": "%",
+        "diff_type": "relative",
+        "era5_path": f"{BUCKET}/era5_land/daily_aggregates/wind_speed_10m.zarr",
+        "era5_clim_path": f"{BUCKET}/era5_land/climatologies/wind-speed-10m_mean_1971-2010.zarr",
+        "cmip6_path": f"{BUCKET}/cmip6_downscaled_woodwell/daily/sfcwind/sfcwind_{CMIP6_MODEL}_day.zarr",
+        "clim_path": f"{BUCKET}/cmip6_downscaled_woodwell/climatologies/sfcwind/sfcwind_{CMIP6_MODEL}_mean_1971-2010.zarr",
+        "era5_var": "wind_speed",
+        "cmip6_var": "sfcwind",
         "diff_var": "diff",
     },
 }
@@ -104,24 +171,32 @@ def load_datasets(var_key):
     ds_era5_clim = xr.open_zarr(fs.get_mapper(cfg["era5_clim_path"])).load()
     ds_era5_clim = standardize_dims(ds_era5_clim)
 
-    if var_key == "precipitation":
-        # Convert ERA5 from meters to mm
+    # --- Unit conversions and display values ---
+    era5_vals = ds_era5_clim[cfg["era5_var"]]
+    cmip6_vals = ds_clim[cfg["cmip6_var"]]
+
+    if var_key == "pr":
+        # ERA5: meters -> mm/day
         ds_a[cfg["era5_var"]] = ds_a[cfg["era5_var"]] * 1000
-        # Convert CMIP6 precipitation from kg m-2 s-1 (mm/s) to mm/day
+        era5_vals = era5_vals * 1000
+        # CMIP6: mm/s -> mm/day
         ds_b[cfg["cmip6_var"]] = ds_b[cfg["cmip6_var"]] * 86400
-        ds_clim[cfg["cmip6_var"]] = ds_clim[cfg["cmip6_var"]] * 86400
+        cmip6_vals = cmip6_vals * 86400
+        ds_clim[cfg["cmip6_var"]] = cmip6_vals
+    elif var_key == "rsds":
+        # ERA5: J/m2 -> W/m2 (divide by seconds in a day)
+        ds_a[cfg["era5_var"]] = ds_a[cfg["era5_var"]] / 86400
+        era5_vals = era5_vals / 86400
 
-        era5_vals = ds_era5_clim[cfg["era5_var"]] * 1000
-        cmip6_vals = ds_clim[cfg["cmip6_var"]]
-
+    # --- Difference calculation ---
+    if cfg["diff_type"] == "relative":
+        # Avoid division by zero: replace very small era5 values with NaN or similar
+        # but for climatology (40yr mean), zero is rare unless it's desert/dry season
         diff_val = (cmip6_vals - era5_vals) / era5_vals * 100
-        ds_diff[cfg["diff_var"]] = diff_val
-    elif var_key == "temperature":
-        era5_vals = ds_era5_clim[cfg["era5_var"]]
-        cmip6_vals = ds_clim[cfg["cmip6_var"]]
-
+    else:
         diff_val = cmip6_vals - era5_vals
-        ds_diff[cfg["diff_var"]] = diff_val
+
+    ds_diff[cfg["diff_var"]] = diff_val
 
     return ds_a, ds_b, ds_clim, ds_diff
 
@@ -524,7 +599,7 @@ def server(input, output, session):
 
         fig, ax = plt.subplots(figsize=(8, 5))
 
-        if input.variable() == "precipitation":
+        if input.variable() == "pr":
             for ts, label, color in [
                 (ts_a, "ERA5-Land", "#1f77b4"),
                 (ts_b, "Downscaled data", "#ff7f0e"),
@@ -584,7 +659,7 @@ def server(input, output, session):
         if len(ts_a) == 0 or len(ts_b) == 0:
             return ui.div()
 
-        is_pr = input.variable() == "precipitation"
+        is_pr = input.variable() == "pr"
 
         if is_pr:
             row1_label = "Dry days (<1mm)"
