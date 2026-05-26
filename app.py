@@ -11,7 +11,6 @@ from shiny import App, reactive, render, ui
 # --- Constants ---
 BUCKET = "clim_data_reg_useast1"
 DISPLAY_CELLS = 60
-CACHE_PADDING = 10
 MIN_CITY_POP = 500_000
 KDE_BANDWIDTH = 0.05
 
@@ -305,8 +304,7 @@ def server(input, output, session):
         lat_c, lon_c = new_center
 
         res = 0.1
-        total_cells = DISPLAY_CELLS + CACHE_PADDING
-        half = total_cells * res
+        half = DISPLAY_CELLS * res
         # Pad by half a cell so slice() always includes the boundary grid points
         eps = res / 2.0
 
@@ -530,8 +528,12 @@ def server(input, output, session):
             return fig
         da, ts, extent = data
         cfg = VARS_CONFIG[input.variable()]
+        
+        # Robust color scaling using 1st and 99th percentiles
+        vmin, vmax = np.nanpercentile(da, [1, 99])
+        
         return render_map(
-            da, extent, "", None, None, "viridis", cfg["units"], cfg["units"]
+            da, extent, "", vmin, vmax, "viridis", cfg["units"], cfg["units"]
         )
 
     @output
@@ -543,12 +545,16 @@ def server(input, output, session):
         crop_b, _, extent = data
         cfg = VARS_CONFIG[input.variable()]
         da = crop_b[cfg["cmip6_var"]]
+        
+        # Robust color scaling using 1st and 99th percentiles
+        vmin, vmax = np.nanpercentile(da, [1, 99])
+        
         return render_map(
             da,
             extent,
             "Downscaled Climatology (1971-2010)",
-            None,
-            None,
+            vmin,
+            vmax,
             "viridis",
             cfg["units"],
             cfg["units"],
